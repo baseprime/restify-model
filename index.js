@@ -24,7 +24,9 @@ function Factory(__super) {
       return v.toString(16);
     });
 
-    if (_util.isFunction(this.constructor.initialize)) this.constructor.initialize.apply(this, arguments);
+    if (_util.isFunction(this.constructor.initialize)) {
+      this.constructor.initialize.apply(this, arguments);
+    }
   }
 
   Model.prototype = _util.merge({}, _events, _model_proto, __super.prototype);
@@ -166,30 +168,6 @@ Collection.prototype.map = function(func, context) {
   return values;
 }
 
-Collection.prototype.depth = function() {
-  var paths = {
-      list: {},
-      detail: {}
-    },
-    depth = 0,
-    context = this.parent();
-
-  if (!this.path || this.path === context.path) return false;
-
-  while (context) {
-    var parentPath = context.depth();
-
-    if (parentPath) {
-      _util.merge(paths, parentPath);
-      depth++;
-    }
-
-    context = context.parent();
-  }
-
-  return paths;
-}
-
 Collection.prototype.pending = function() {
   return this.filter(function(model) {
     return !model.id();
@@ -292,7 +270,7 @@ Collection.prototype.extend = function(attrs) {
       _parent: this
     });
 
-  return Extended.plugin(Adapter);
+  return Extended.plugin(Adapter).plugin(MakeRoutes);
 }
 
 Collection.prototype.merge = function() {
@@ -302,57 +280,72 @@ Collection.prototype.merge = function() {
   return _util.merge.apply(this, args);
 }
 
+Collection.prototype.middleware = {
+  assign: function(coll) {
+    return function(req, res, next) {
+      console.log(coll._name);
+      req.collection = coll;
+      next();
+    }
+  },
+  list: function(req, res) {
+    res.send(req.collection.toJSON());
+  },
+  detail: function(req, res) {
+    var pk = req.collection.unique_key;
+    var id = req.params[pk];
+
+    console.log(req.params);
+
+    res.send({id: id})
+  },
+  delegate: function(req, res, next) {
+    console.log('del');
+    next();
+  }
+}
+
 Collection.prototype.namespace = function ns(pathname) {
   var self = this;
   var methods = {};
   var middleware = Array.prototype.slice.call(arguments, 1);
   var server = this.server;
   var routerMethods = Object.keys(server.router.routes);
-  var context = pathname || this.path;
   var path = require('path');
+  var context = pathname ? path.join(this.path.toString(), pathname.toString()) : this.path.toString();
 
-  middleware.unshift(this.middleware.assign.bind(this));
-
-  routerMethods.forEach(function(method){
+  routerMethods.forEach(function(method) {
     methods[method.toLowerCase()] = function() {
-      var value = arguments[0],
-        submiddleware = (arguments.length > 2) ? Array.prototype.slice.call(arguments, 1, -1) : [],
-        handler = Array.prototype.slice.call(arguments, -1)[0],
-        fragments = _util.isArray(context) ? context : [context],
-        joined = fragments.concat(value),
-        pattern = path.join.apply({}, joined);
+      var value = arguments[0];
+      var submiddleware = (arguments.length > 2) ? Array.prototype.slice.call(arguments, 1, -1) : [];
+      var handler = Array.prototype.slice.call(arguments, -1)[0];
+      var pattern = path.join(context.toString(), value);
 
-      console.log(pattern);
+      console.log('Route', pattern);
 
       return server[method.toLowerCase()].apply(server, [pattern].concat(middleware).concat(submiddleware).concat([handler]));
     }
   });
 
   return _util.merge(methods, {
-    namespace: function(){
-      var pathname = path.join.apply({}, [context].concat(arguments[0]));
+    toString: String.prototype.toString.bind(context.toString()),
+    namespace: function() {
+      var subpath = path.join(pathname || '', arguments[0] || '');
 
-      return ns.apply(self, [pathname]);
+      return ns.apply(self, [subpath]);
+    },
+    one: function() {
+      return this.namespace('/:' + self.unique_key);
     }
   });
 }
 
-Collection.prototype.middleware = {
-  assign: function(req, res, next){
-    req.collection = this;
-    next();
-  },
-  getAll: function(req, res){
-    res.send(req.collection.toJSON());
-  }
-}
-
-Collection.prototype.pathIdentifier = function(){
+Collection.prototype.pathIdentifier = function() {
   var model = this.parent();
   var params = [this.path, '/:' + this.unique_key];
 
-  while(model){
-    if(!model.path){
+  while (model) {
+    if (!model.path) {
       model = model.parent();
       continue;
     }
@@ -446,9 +439,13 @@ var _util = {
 }
 
 Collection.prototype.routes = {
-  __proto__: Collection.prototype,
-  getOne: function(req, res) {
-
+  '/': {
+    'GET': Collection.prototype.middleware.getAll,
+    'POST': Collection.prototype.middleware.create
+  },
+  '/:id': {
+    'GET': Collection.prototype.middleware.getOne,
+    'PUT': Collection.prototype.middleware.update
   }
 }
 
@@ -651,88 +648,35 @@ function Module(app) {
   });
 }
 
-function Adapter(model) {
-  if (_util.isFunction(model.adapter)) {
-    model._persist = model.adapter.apply(model, model);
+function Adapter(collection) {
+  if (_util.isFunction(collection.adapter)) {
+    collection._persist = collection.adapter.apply(collection, collection);
   }
 }
 
-function Router(collection) {
+function MakeRoutes(collection) {
+  var list, detail;
+
   if (!collection.path) {
     return false;
+  } else if ('string' === typeof collection.path && collection.service) {
+    list = collection.namespace();
+    detail = collection.path = collection.namespace().one();
+  } else if ('string' === typeof collection.path) {
+    list = collection.path = collection.namespace();
+  } else if(collection.service) {
+    list = collection.namespace();
+    detail = collection.path = collection.namespace().one();
+  } else{
+    list = collection.path;
   }
 
-  var routes = {},
-    basePath = collection.path,
-    pathAll = '/',
-    pathOne = '/:' + collection.unique_key;
+  list.get('', collection.middleware.assign(collection), collection.middleware.list);
+  list.post('', collection.middleware.assign(collection), collection.middleware.create);
 
-  var context = collection.parent(),
-    ancestors = 0,
-    actualPath = collection.path;
-
-  while (context) {
-    if (context.path) {
-      actualPath = context.path + '/.*' + collection.path;
-      ancestors++;
-    }
-
-    context = context.parent();
-  }
-
-  routes[basePath] = {};
-
-  routes[basePath][pathAll] = {
-    get: function(req, res, next) {
-      req._resource = collection;
-      next();
-    },
-    post: function(req, res, next) {
-      var data = req.body || req.query;
-
-      req._resource = new collection(data);
-      req._resource.save();
-      res.status(201);
-      next();
-    }
-  }
-
-  routes[basePath][pathOne] = {
-    get: function(req, res, next) {
-      req._resource = collection.get(req.params[collection.unique_key]);
-      next();
-    },
-    put: function(req, res, next) {
-      var id = req.params[collection.unique_key],
-        data = req.body || req.query;
-
-      req._resource = collection.get(id);
-      req._resource.attr(data).save();
-      next();
-    }
-  }
-
-  collection._routes = routes;
-
-  for (var path_prefix in routes) {
-    var routes = routes[path_prefix];
-
-    for (var path in routes) {
-      var methods = routes[path],
-        path = path_prefix + path;
-
-      for (var method in methods) {
-        var handler = methods[method];
-
-        collection.server[method.toLowerCase()](path, handler, function(req, res) {
-          if (!req._resource) {
-            res.status(404);
-          } else {
-            res.send(req._resource.toJSON());
-          }
-        });
-      }
-    }
+  if(detail){
+    detail.get('', collection.middleware.assign(collection), collection.middleware.detail);
+    detail.put('', collection.middleware.assign(collection), collection.middleware.update);
   }
 }
 
