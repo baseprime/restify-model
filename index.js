@@ -8,10 +8,8 @@
  * Released under MIT License. See LICENSE or http://opensource.org/licenses/MIT
  */
 
-function Collection(attrs) {
-  _util.merge(this, _events, attrs);
-  this.collection = [];
-}
+var path = require('path');
+var EventEmitter = require('events').EventEmitter;
 
 function Factory(__super) {
   function Model(attributes) {
@@ -24,22 +22,43 @@ function Factory(__super) {
       return v.toString(16);
     });
 
+    _util.merge(this, new EventEmitter());
+
     if (_util.isFunction(this.constructor.initialize)) {
       this.constructor.initialize.apply(this, arguments);
     }
   }
 
-  Model.prototype = _util.merge({}, _events, _model_proto, __super.prototype);
+  Model.prototype = _util.merge({}, _model_proto, __super.prototype);
   Model.prototype.constructor = Model;
 
   return Model;
 }
 
+function Collection(attrs, explicitAttrs) {
+  var attributes = attrs || {};
+  var explicit = explicitAttrs || {};
+  var parent = attributes._parent || Object;
+  var Fn = _util.merge(new Factory(parent), this, attributes, new EventEmitter(), {
+    collection: explicit.collection || [],
+    path: explicit.path
+  });
+
+  if (attributes.init) {
+    attributes.init.apply(Fn, arguments)
+  }
+
+  return Fn.plugin(Adapters).plugin(Routes);
+}
+
 Collection.prototype.add = function(obj) {
   var self = this;
+  var id;
+  var exists;
+  var model;
 
   if (obj.constructor === this) {
-    var model = obj;
+    model = obj;
   } else if (_util.isArray(obj)) {
     for (var index in obj) {
       self.add(obj[index]);
@@ -47,17 +66,17 @@ Collection.prototype.add = function(obj) {
 
     return this;
   } else {
-    var model = new self(obj);
+    model = new self(obj);
   }
 
-  var id = model.id(),
-    exists = id && this.get(id);
+  id = model.id();
+  exists = id && this.get(id);
 
   if (exists) {
     exists.attr(model.attr());
   } else {
     this.collection.push(model);
-    this.trigger('add', [model]);
+    this.emit('add', [model]);
   }
 
   return this;
@@ -73,31 +92,13 @@ Collection.prototype.chain = function(collection) {
   });
 }
 
-Collection.prototype.context = function(path) {
-  var self = this,
-    middleware = Array.prototype.slice.call(arguments, 1);
-  opts = ('object' === typeof middleware[0]) ? middleware.shift() : {},
-    method = opts.method.toLowerCase() || 'get';
-
-  return function() {
-    var value = arguments[0],
-      submiddleware = (arguments.length > 2) ? Array.prototype.slice.call(arguments, 1, -1) : [],
-      handler = Array.prototype.slice.call(arguments, -1)[0],
-      prefix = (path.slice(-1) !== '/' && value !== '/' && value !== '') ? path + '/' : path,
-      path = (value.substr(0, 1) !== '/') ? value : value.substr(1),
-      pattern = prefix + path;
-
-    return self.server[method].apply(self, [pattern].concat(middleware).concat(submiddleware).concat([handler]));
-  }
-}
-
 Collection.prototype.count = function() {
   return this.all().length;
 }
 
 Collection.prototype.detect = function(iterator) {
-  var all = this.all(),
-    model;
+  var all = this.all();
+  var model;
 
   for (var i = 0, length = all.length; i < length; i++) {
     model = all[i]
@@ -175,8 +176,8 @@ Collection.prototype.pending = function() {
 }
 
 Collection.prototype.pluck = function(attribute) {
-  var all = this.all(),
-    plucked = [];
+  var all = this.all();
+  var plucked = [];
 
   for (var i = 0, length = all.length; i < length; i++) {
     plucked.push(all[i].attr(attribute));
@@ -197,7 +198,7 @@ Collection.prototype.remove = function(model) {
 
   if (index !== undefined) {
     this.collection.splice(index, 1);
-    this.trigger('remove', [model]);
+    this.emit('remove', [model]);
 
     return true;
   } else {
@@ -210,9 +211,9 @@ Collection.prototype.reverse = function() {
 }
 
 Collection.prototype.select = function(fn, context) {
-  var all = this.all(),
-    selected = [],
-    model;
+  var all = this.all();
+  var selected = [];
+  var model;
 
   for (var i = 0, length = all.length; i < length; i++) {
     model = all[i];
@@ -235,8 +236,8 @@ Collection.prototype.sortBy = function(attribute_or_func) {
   }
 
   return this.sort(function(a, b) {
-    var a_attr = is_func ? extract(a) : a.attr(attribute_or_func),
-      b_attr = is_func ? extract(b) : b.attr(attribute_or_func);
+    var a_attr = is_func ? extract(a) : a.attr(attribute_or_func);
+    var b_attr = is_func ? extract(b) : b.attr(attribute_or_func);
 
     if (a_attr < b_attr) {
       return -1;
@@ -265,12 +266,11 @@ Collection.prototype.plugin = function(plugin) {
 }
 
 Collection.prototype.extend = function(attrs) {
-  var copy = _util.merge({}, this, attrs),
-    Extended = _util.merge(new Factory(this), new Collection(copy), {
-      _parent: this
-    });
+  var copy = _util.merge({}, this, attrs, {
+    _parent: this
+  });
 
-  return Extended.plugin(Adapter).plugin(MakeRoutes);
+  return new Collection(copy, attrs);
 }
 
 Collection.prototype.merge = function() {
@@ -281,80 +281,83 @@ Collection.prototype.merge = function() {
 }
 
 Collection.prototype.middleware = {
-  assign: function(coll) {
+  assign: function(stack) {
     return function(req, res, next) {
-      console.log(coll._name);
-      req.collection = coll;
+      req._resources = stack;
+      req.collection = stack.slice().pop();
       next();
     }
   },
   list: function(req, res) {
     res.send(req.collection.toJSON());
   },
-  detail: function(req, res) {
+  detail: function(req, res, next) {
     var pk = req.collection.unique_key;
     var id = req.params[pk];
+    var model = req.collection.get(id);
 
-    console.log(req.params);
+    if (!model) {
+      res.send(404);
+    } else {
+      res.send(model.toJSON());
+    }
+  },
+  update: function(req, res) {
 
-    res.send({id: id})
+  },
+  create: function(req, res) {
+
+  },
+  remove: function(req, res) {
+
   },
   delegate: function(req, res, next) {
     console.log('del');
     next();
+  },
+  end: function(req, res, next) {
+
   }
 }
 
 Collection.prototype.namespace = function ns(pathname) {
+  if (!this.path) {
+    throw new RestifyModelException('Cannot create namespace of invalid path');
+  }
+
   var self = this;
   var methods = {};
   var middleware = Array.prototype.slice.call(arguments, 1);
   var server = this.server;
   var routerMethods = Object.keys(server.router.routes);
-  var path = require('path');
   var context = pathname ? path.join(this.path.toString(), pathname.toString()) : this.path.toString();
 
   routerMethods.forEach(function(method) {
-    methods[method.toLowerCase()] = function() {
+    var methodName = method.toLowerCase().replace(/delete/gi, 'del');
+    methods[methodName] = function() {
       var value = arguments[0];
       var submiddleware = (arguments.length > 2) ? Array.prototype.slice.call(arguments, 1, -1) : [];
       var handler = Array.prototype.slice.call(arguments, -1)[0];
       var pattern = path.join(context.toString(), value);
 
-      console.log('Route', pattern);
+      console.log(method, pattern);
 
-      return server[method.toLowerCase()].apply(server, [pattern].concat(middleware).concat(submiddleware).concat([handler]));
+      return server[methodName].apply(server, [pattern].concat(middleware).concat(submiddleware).concat([handler]));
     }
   });
 
   return _util.merge(methods, {
+    _ctx: self,
     toString: String.prototype.toString.bind(context.toString()),
     namespace: function() {
       var subpath = path.join(pathname || '', arguments[0] || '');
 
       return ns.apply(self, [subpath]);
     },
-    one: function() {
+    detail: function() {
       return this.namespace('/:' + self.unique_key);
     }
   });
-}
-
-Collection.prototype.pathIdentifier = function() {
-  var model = this.parent();
-  var params = [this.path, '/:' + this.unique_key];
-
-  while (model) {
-    if (!model.path) {
-      model = model.parent();
-      continue;
-    }
-
-    params.unshift(model.pathIdentifier());
-    model = model.parent();
-  }
-
-  return params.join('');
 }
 
 Collection.prototype.include = function(obj) {
@@ -366,6 +369,10 @@ Collection.prototype.include = function(obj) {
 Collection.prototype.parent = function() {
   return this._parent;
 }
+
+Collection.prototype.service = true;
+
+Collection.prototype.operations = 'CRUD';
 
 function ErrorHandler(model) {
   this.errors = {};
@@ -438,68 +445,6 @@ var _util = {
   }
 }
 
-Collection.prototype.routes = {
-  '/': {
-    'GET': Collection.prototype.middleware.getAll,
-    'POST': Collection.prototype.middleware.create
-  },
-  '/:id': {
-    'GET': Collection.prototype.middleware.getOne,
-    'PUT': Collection.prototype.middleware.update
-  }
-}
-
-var _events = {
-  on: function(event, callback) {
-    this.events = this.events || {};
-    this.events[event] = this.events[event] || [];
-    this.events[event].push(callback);
-
-    return this;
-  },
-  trigger: function(name, data) {
-    this.events = this.events || {};
-
-    var events = this.events[name];
-
-    if (events) {
-      for (var i = 0; i < events.length; i++) {
-        events[i].apply(this, data || []);
-      }
-    }
-
-    return this;
-  },
-  off: function(event, callback) {
-    this.events = this.events || {};
-
-    if (callback) {
-      var events = this.events[event] || [];
-
-      for (var i = 0; i < events.length; i++) {
-        if (events[i] === callback) {
-          this.events[event].splice(i, 1);
-        }
-      }
-    } else {
-      delete this.events[event];
-    }
-
-    return this;
-  },
-  once: function(event, callback) {
-    var ran = false;
-
-    return this.on(event, function() {
-      if (ran) return false;
-      ran = true;
-      callback.apply(this, arguments);
-      callback = null;
-      return true;
-    });
-  }
-}
-
 var _model_proto = {
   attr: function(name, value) {
     if (arguments.length === 0) {
@@ -514,7 +459,7 @@ var _model_proto = {
         this.changes[name] = value;
       }
 
-      this.trigger('change:' + name, [this]);
+      this.emit('change:' + name, [this]);
 
       return this;
     } else if (typeof name === 'object') {
@@ -523,7 +468,7 @@ var _model_proto = {
         this.attr(key, name[key]);
       }
 
-      this.trigger('change', [this]);
+      this.emit('change', [this]);
 
       return this;
     } else {
@@ -545,7 +490,7 @@ var _model_proto = {
 
     /****
      * Wrap the existing callback in this function so we always manage the
-     * collection and trigger events from here rather than relying on the
+     * collection and emit events from here rather than relying on the
      * persist adapter to do it for us. The persist adapter is
      * only required to execute the callback with a single argument - a
      * boolean to indicate whether the call was a success - though any
@@ -558,7 +503,7 @@ var _model_proto = {
         // Add/remove from collection if persist was successful.
         manageCollection();
         // Trigger the event before executing the callback.
-        self.trigger(method);
+        self.emit(method);
       }
 
       // Store the return value of the callback.
@@ -602,8 +547,8 @@ var _model_proto = {
     return this.id() === undefined;
   },
   pick: function(keys) {
-    var result = {},
-      attrs = this.attr();
+    var result = {};
+    var attrs = this.attr();
 
     for (var prop in keys) {
       var key = keys[prop];
@@ -642,42 +587,77 @@ var _model_proto = {
   }
 }
 
-function Module(app) {
-  return (new Collection()).extend({
-    server: app
-  });
+function RestifyModelException(msg) {
+  this.name = 'RestifyModelException';
+  this.message = msg;
 }
 
-function Adapter(collection) {
+function Adapters(collection) {
   if (_util.isFunction(collection.adapter)) {
     collection._persist = collection.adapter.apply(collection, collection);
   }
 }
 
-function MakeRoutes(collection) {
-  var list, detail;
+function Routes(collection) {
+  var list, detail, context;
+  var tree = [collection];
+  var opers = Array.prototype.slice.call(collection.operations);
 
-  if (!collection.path) {
+  if (!~opers.indexOf('C')) {
     return false;
-  } else if ('string' === typeof collection.path && collection.service) {
-    list = collection.namespace();
-    detail = collection.path = collection.namespace().one();
-  } else if ('string' === typeof collection.path) {
-    list = collection.path = collection.namespace();
-  } else if(collection.service) {
-    list = collection.namespace();
-    detail = collection.path = collection.namespace().one();
-  } else{
-    list = collection.path;
   }
 
-  list.get('', collection.middleware.assign(collection), collection.middleware.list);
-  list.post('', collection.middleware.assign(collection), collection.middleware.create);
+  if ('object' === typeof collection.path) {
+    list = collection.path;
+  } else if ('string' === typeof collection.path) {
+    list = collection.namespace();
+  } else {
+    return false;
+  }
 
-  if(detail){
-    detail.get('', collection.middleware.assign(collection), collection.middleware.detail);
-    detail.put('', collection.middleware.assign(collection), collection.middleware.update);
+  context = list._ctx;
+
+  while (context) {
+    if (!context.path || !context.path._ctx) {
+      break;
+    } else if (context.path._ctx === context) {
+      tree.unshift(context);
+      break;
+    } else {
+      tree.unshift(context);
+      context = context.path._ctx;
+    }
+  }
+
+  var M = collection.middleware;
+
+  list.get('', M.assign(tree), M.list);
+
+  if (collection.service) {
+    detail = collection.path = list.namespace().detail();
+    list.post('', M.assign(tree), M.create);
+
+    if (~opers.indexOf('R')) {
+      detail.get('', M.assign(tree), M.detail);
+    }
+
+    if (~opers.indexOf('U')) {
+      detail.put('', M.assign(tree), M.update);
+    }
+
+    if (~opers.indexOf('D')) {
+      detail.del('', M.assign(tree), M.remove);
+    }
   }
 }
 
-module.exports = exports = Module;
+function Module(app) {
+  return new Collection({
+    server: app
+  });
+}
+
+module.exports = exports = Module
+module.exports.mount = Module;
+module.exports.Base = new Collection();
+module.exports.RestifyModelException = RestifyModelException;
