@@ -8,8 +8,12 @@
  * Released under MIT License. See LICENSE or http://opensource.org/licenses/MIT
  */
 
+"use strict";
 var path = require('path');
 var EventEmitter = require('events').EventEmitter;
+var _util = require('./lib/util');
+var Routes = require('./lib/routes');
+var Adapters = require('./lib/adapters');
 
 function Factory(__super) {
   function Model(attributes) {
@@ -280,46 +284,6 @@ Collection.prototype.merge = function() {
   return _util.merge.apply(this, args);
 }
 
-Collection.prototype.middleware = {
-  assign: function(stack) {
-    return function(req, res, next) {
-      req._resources = stack;
-      req.collection = stack.slice().pop();
-      next();
-    }
-  },
-  list: function(req, res) {
-    res.send(req.collection.toJSON());
-  },
-  detail: function(req, res, next) {
-    var pk = req.collection.unique_key;
-    var id = req.params[pk];
-    var model = req.collection.get(id);
-
-    if (!model) {
-      res.send(404);
-    } else {
-      res.send(model.toJSON());
-    }
-  },
-  update: function(req, res) {
-
-  },
-  create: function(req, res) {
-
-  },
-  remove: function(req, res) {
-
-  },
-  delegate: function(req, res, next) {
-    console.log('del');
-    next();
-  },
-  end: function(req, res, next) {
-
-  }
-}
-
 Collection.prototype.namespace = function ns(pathname) {
   if (!this.path) {
     throw new RestifyModelException('Cannot create namespace of invalid path');
@@ -339,8 +303,6 @@ Collection.prototype.namespace = function ns(pathname) {
       var submiddleware = (arguments.length > 2) ? Array.prototype.slice.call(arguments, 1, -1) : [];
       var handler = Array.prototype.slice.call(arguments, -1)[0];
       var pattern = path.join(context.toString(), value);
-
-      console.log(method, pattern);
 
       return server[methodName].apply(server, [pattern].concat(middleware).concat(submiddleware).concat([handler]));
     }
@@ -412,38 +374,6 @@ ErrorHandler.prototype = {
     return count;
   }
 };
-
-var _util = {
-  merge: function(receiver) {
-    var args = Array.prototype.slice.call(arguments, 1);
-
-    for (var i = 0, length = args.length; i < length; i++) {
-      for (var property in args[i]) {
-        receiver[property] = args[i][property];
-      }
-    }
-
-    return receiver;
-  },
-  inArray: function(array, obj) {
-    if (array.indexOf) return array.indexOf(obj);
-
-    for (var i = 0, length = array.length; i < length; i++) {
-      if (array[i] === obj) return i;
-    }
-
-    return -1;
-  },
-  isArray: function(arr) {
-    return Array.isArray(arr);
-  },
-  isFunction: function(obj) {
-    return Object.prototype.toString.call(obj) === '[object Function]';
-  },
-  isPlainObject: function(obj) {
-    return Object.prototype.toString.call(obj) === '[object Object]';
-  }
-}
 
 var _model_proto = {
   attr: function(name, value) {
@@ -587,68 +517,59 @@ var _model_proto = {
   }
 }
 
+Collection.prototype.middleware = {
+  extend: function(attrs) {
+    return _util.merge({}, this, attrs);
+  },
+  assign: function(stack) {
+    return function(req, res, next) {
+      req._resources = stack;
+      req.collection = stack.slice().pop();
+      next();
+    }
+  },
+  list: function(req, res) {
+    res.send(req.collection.toJSON());
+  },
+  detail: function(req, res, next) {
+    var pk = req.collection.unique_key;
+    var id = req.params[pk];
+    var model = req.collection.get(id);
+
+    if (!model) {
+      return res.send(404);
+    }
+    
+    req.model = model;
+
+    return next();
+  },
+  read: function(req, res){
+    res.send(req.model.toJSON());
+  },
+  update: function(req, res) {
+
+  },
+  create: function(req, res) {
+
+  },
+  remove: function(req, res) {
+
+  },
+  head: function(req, res) {
+    res.end();
+  },
+  delegate: function(req, res, next) {
+    
+  },
+  end: function(req, res, next) {
+
+  }
+}
+
 function RestifyModelException(msg) {
   this.name = 'RestifyModelException';
   this.message = msg;
-}
-
-function Adapters(collection) {
-  if (_util.isFunction(collection.adapter)) {
-    collection._persist = collection.adapter.apply(collection, collection);
-  }
-}
-
-function Routes(collection) {
-  var list, detail, context;
-  var tree = [collection];
-  var opers = Array.prototype.slice.call(collection.operations);
-
-  if (!~opers.indexOf('C')) {
-    return false;
-  }
-
-  if ('object' === typeof collection.path) {
-    list = collection.path;
-  } else if ('string' === typeof collection.path) {
-    list = collection.namespace();
-  } else {
-    return false;
-  }
-
-  context = list._ctx;
-
-  while (context) {
-    if (!context.path || !context.path._ctx) {
-      break;
-    } else if (context.path._ctx === context) {
-      tree.unshift(context);
-      break;
-    } else {
-      tree.unshift(context);
-      context = context.path._ctx;
-    }
-  }
-
-  var M = collection.middleware;
-
-  list.get('', M.assign(tree), M.list);
-
-  if (collection.service) {
-    detail = collection.path = list.namespace().detail();
-    list.post('', M.assign(tree), M.create);
-
-    if (~opers.indexOf('R')) {
-      detail.get('', M.assign(tree), M.detail);
-    }
-
-    if (~opers.indexOf('U')) {
-      detail.put('', M.assign(tree), M.update);
-    }
-
-    if (~opers.indexOf('D')) {
-      detail.del('', M.assign(tree), M.remove);
-    }
-  }
 }
 
 function Module(app) {

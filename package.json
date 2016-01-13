@@ -7,7 +7,6 @@
     "test": "node test/test.js"
   },
   "devDependencies": {
-    "express": "^4.13.3",
     "restify": "^4.0.3"
   },
   "author": "Greg Sabia Tucker",
