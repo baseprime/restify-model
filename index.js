@@ -1,9 +1,10 @@
 /****
  * Restify Model
- *
+ * https://github.com/bytecipher/restify-model
+ * 
  * @author Greg Sabia Tucker <greg@bytecipher.io>
  * @link http://bytecipher.io
- * @version 0.1.0
+ * @version 0.2.0
  *
  * Released under MIT License. See LICENSE or http://opensource.org/licenses/MIT
  */
