@@ -1,13 +1,12 @@
 {
   "name": "restify-model",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "'Model adapter for Restify or Express.js'",
   "main": "index.js",
   "scripts": {
     "test": "node test/test.js"
   },
   "devDependencies": {
-    "express": "^4.13.3",
     "restify": "^4.0.3"
   },
   "author": "Greg Sabia Tucker",
