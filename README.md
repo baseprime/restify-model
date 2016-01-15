@@ -188,7 +188,7 @@ var Person = DBModel.extend({
   }
 });
 
-var tim = new Enchanter({ name: 'Tim', occupation: 'Enchanter' });
+var tim = new Person({ name: 'Tim', occupation: 'Enchanter' });
 
 tim.save();
 // => Created 54b9e08ed983b41d432473e4
