@@ -294,15 +294,15 @@ Collection.prototype.namespace = function ns(pathname) {
   var middleware = Array.prototype.slice.call(arguments, 1);
   var server = this.server;
   var routerMethods = Object.keys(server.router.routes);
-  var context = pathname ? path.join(this.path.toString(), pathname.toString()) : this.path.toString();
+  var context = pathname ? path.join(this.path.toString(), pathname.toString().replace(/\/$/, '')) : this.path.toString().replace(/\/$/, '');
 
   routerMethods.forEach(function(method) {
-    var methodName = method.toLowerCase().replace(/delete/gi, 'del');
+    var methodName = method.toLowerCase().replace(/delete/i, 'del');
     methods[methodName] = function() {
       var value = arguments[0];
       var submiddleware = (arguments.length > 2) ? Array.prototype.slice.call(arguments, 1, -1) : [];
       var handler = Array.prototype.slice.call(arguments, -1)[0];
-      var pattern = path.join(context.toString(), value);
+      var pattern = path.join(context.toString(), value).replace(/\/$/, '');
 
       return server[methodName].apply(server, [pattern].concat(middleware).concat(submiddleware).concat([handler]));
     }
@@ -319,6 +319,12 @@ Collection.prototype.namespace = function ns(pathname) {
     detail: function() {
       return this.namespace('/:' + self.unique_key);
     }
+  });
+}
+
+Collection.prototype.nest = function nestedRoute(namespace, attrs){
+  return new Collection(attrs, {
+    path: this.namespace(namespace)
   });
 }
 
@@ -555,9 +561,6 @@ Collection.prototype.middleware = {
   },
   remove: function(req, res) {
 
-  },
-  head: function(req, res) {
-    res.end();
   },
   delegate: function(req, res, next) {
     
