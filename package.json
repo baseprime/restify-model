@@ -14,7 +14,9 @@
   "directories": {
     "test": "test"
   },
-  "dependencies": {},
+  "dependencies": {
+    "assert-plus": "^0.2.0"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/bytecipher/restify-model.git"

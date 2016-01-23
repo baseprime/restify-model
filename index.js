@@ -15,8 +15,9 @@ var EventEmitter = require('events').EventEmitter;
 var _util = require('./lib/util');
 var Routes = require('./lib/routes');
 var Adapters = require('./lib/adapters');
+var assert = require('assert-plus');
 
-function Factory(__super) {
+function Constructor(__super) {
   function Model(attributes) {
     this.attributes = _util.merge({}, this.constructor.defaults || {}, attributes || {});
     this.changes = {};
@@ -44,16 +45,16 @@ function Collection(attrs, explicitAttrs) {
   var attributes = attrs || {};
   var explicit = explicitAttrs || {};
   var parent = attributes._parent || Object;
-  var Fn = _util.merge(new Factory(parent), this, attributes, new EventEmitter(), {
+
+  return _util.merge(new Constructor(parent), this, attributes, new EventEmitter(), {
     collection: explicit.collection || [],
-    path: explicit.path
-  });
-
-  if (attributes.init) {
-    attributes.init.apply(Fn, arguments)
-  }
-
-  return Fn.plugin(Adapters).plugin(Routes);
+    path: explicit.path,
+    uid: 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = Math.random() * 16 | 0,
+        v = c == 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    })
+  }).plugin(Adapters).plugin(Routes);
 }
 
 Collection.prototype.add = function(obj) {
@@ -91,17 +92,13 @@ Collection.prototype.all = function() {
   return this.collection.slice();
 }
 
-Collection.prototype.chain = function(collection) {
-  return _util.merge({}, this, {
-    collection: collection || []
-  });
-}
-
 Collection.prototype.count = function() {
   return this.all().length;
 }
 
 Collection.prototype.detect = function(iterator) {
+  assert.func(iterator, 'detect.iterator');
+
   var all = this.all();
   var model;
 
@@ -112,6 +109,8 @@ Collection.prototype.detect = function(iterator) {
 }
 
 Collection.prototype.each = function(iterator, context) {
+  assert.func(iterator, 'each.iterator');
+
   var all = this.all()
 
   for (var i = 0, length = all.length; i < length; i++) {
@@ -122,6 +121,8 @@ Collection.prototype.each = function(iterator, context) {
 }
 
 Collection.prototype.filter = function(iterator) {
+  assert.func(iterator, 'filter.iterator');
+
   return this.collection.filter(iterator);
 }
 
@@ -133,6 +134,10 @@ Collection.prototype.get = function(id) {
   return this.detect(function() {
     return this.id() == id;
   });
+}
+
+Collection.prototype.keyname = function(){
+  return this.unique_key + '_' + this.uid;
 }
 
 Collection.prototype.last = function() {
@@ -164,6 +169,8 @@ Collection.prototype.load = function(callback) {
 }
 
 Collection.prototype.map = function(func, context) {
+  assert.func(func, 'map.iterator');
+
   var all = this.all();
   var values = [];
 
@@ -191,7 +198,35 @@ Collection.prototype.pluck = function(attribute) {
   return plucked;
 }
 
+Collection.prototype.relationship = function(key) {
+  var self = this;
+
+  return function(model) {
+    var nodes = model.get(key);
+    var matches = [];
+
+    if (_util.isArray(nodes)) {
+      matches = this.select(function(model) {
+        return ~nodes.indexOf(model.id());
+      });
+    } else {
+      matches.push(this.get(nodes));
+    }
+
+    return matches;
+  }
+}
+
+Collection.prototype.related = function(model) {
+  assert.object(model, 'related.model');
+  assert.func(this.key, 'collection.key');
+
+  return this.key.call(this, model);
+}
+
 Collection.prototype.remove = function(model) {
+  assert.object(model, 'remove.model');
+
   var index;
 
   for (var i = 0, length = this.collection.length; i < length; i++) {
@@ -212,7 +247,7 @@ Collection.prototype.remove = function(model) {
 }
 
 Collection.prototype.reverse = function() {
-  return this.chain(this.all().reverse());
+  return this.all().reverse();
 }
 
 Collection.prototype.select = function(fn, context) {
@@ -225,13 +260,11 @@ Collection.prototype.select = function(fn, context) {
     if (fn.call(context || model, model, i, all)) selected.push(model);
   }
 
-  return this.chain(selected);
+  return selected;
 }
 
 Collection.prototype.sort = function(fn) {
-  var sorted = this.all().sort(fn);
-
-  return this.chain(sorted);
+  return this.all().sort(fn);
 }
 
 Collection.prototype.sortBy = function(attribute_or_func) {
@@ -317,15 +350,9 @@ Collection.prototype.namespace = function ns(pathname) {
 
       return ns.apply(self, [subpath]);
     },
-    detail: function() {
-      return this.namespace('/:' + self.unique_key);
+    inherits: function(coll) {
+      return this.namespace('/:' + coll.keyname());
     }
-  });
-}
-
-Collection.prototype.nest = function nestedRoute(namespace, attrs){
-  return new Collection(attrs, {
-    path: this.namespace(namespace)
   });
 }
 
@@ -532,26 +559,42 @@ Collection.prototype.middleware = {
     return function(req, res, next) {
       req._resources = stack;
       req.collection = stack.slice().pop();
+
+      if (stack && stack.length > 1 && req.collection) {
+        var prevIndex = stack.indexOf(req.collection) - 1;
+        var Coll = stack[prevIndex];
+
+        req.model = Coll.get(req.params[Coll.keyname()]);
+      }
+
       next();
     }
   },
   list: function(req, res) {
-    res.send(req.collection.toJSON());
+    var data;
+
+    if (req.collection.key && req.model) {
+      data = req.collection.key.call(req.collection, req.model);
+    } else {
+      data = req.collection.toJSON();
+    }
+
+    res.send(data);
   },
   detail: function(req, res, next) {
-    var pk = req.collection.unique_key;
+    var pk = req.collection.keyname();
     var id = req.params[pk];
     var model = req.collection.get(id);
 
     if (!model) {
       return res.send(404);
     }
-    
+
     req.model = model;
 
     return next();
   },
-  read: function(req, res){
+  read: function(req, res) {
     res.send(req.model.toJSON());
   },
   update: function(req, res) {
@@ -564,7 +607,7 @@ Collection.prototype.middleware = {
 
   },
   delegate: function(req, res, next) {
-    
+
   },
   end: function(req, res, next) {
 
@@ -576,13 +619,13 @@ function RestifyModelException(msg) {
   this.message = msg;
 }
 
-function Module(app) {
+function ServerCollection(app) {
   return new Collection({
     server: app
   });
 }
 
-module.exports = exports = Module
-module.exports.mount = Module;
+module.exports = exports = ServerCollection;
+module.exports.mount = ServerCollection;
 module.exports.Base = new Collection();
 module.exports.RestifyModelException = RestifyModelException;

@@ -166,7 +166,7 @@ var DBModel = Model.extend({
       },
       create: function(model) {
         schema.create(model.attributes, function(err, row) {
-          model.attr('id', row._inserted_id);
+          model.set('id', row._inserted_id);
         });
       },
       update: function(model) {
