@@ -54,7 +54,7 @@ server.listen(3000);
 ```javascript
 var Equipment = Model.extend({
   key: Person.relationship('carrying'),
-  path: Person.namespace('equipment'),
+  path: Person.namespace('/equipment'),
   defaults: {
     name: 'Sword'
   }
@@ -271,7 +271,8 @@ tim.save();
 ```javascript
 var Persist = Person.extend({
   middleware: Person.middleware.extend({
-    persist: true // Setting persist to true will load() on every request
+    // Setting persist to true will load() on every request
+    persist: true
   })
 });
 ```
@@ -290,3 +291,12 @@ var Custom = Model.extend({
   }
 });
 ```
+
+### Model as an Action (and disabling CRUD)
+```javascript
+var Action = Model.extend({
+  // Setting service to false disables CRUD operations on /people/add
+  service: false,
+  // GET /people/add
+  path: Person.namespace('/add')
+});
