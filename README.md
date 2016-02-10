@@ -300,6 +300,7 @@ var Action = Model.extend({
   // GET /people/add
   path: Person.namespace('/add')
 });
+```
 
 ### Even more middleware functionality
 ```javascript
