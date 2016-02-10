@@ -4,57 +4,52 @@
  * 
  * @author Greg Sabia Tucker <greg@bytecipher.io>
  * @link http://bytecipher.io
- * @version 0.2.0
  *
  * Released under MIT License. See LICENSE or http://opensource.org/licenses/MIT
  */
 
 "use strict";
 var path = require('path');
-var EventEmitter = require('events').EventEmitter;
-var _util = require('./lib/util');
-var Routes = require('./lib/routes');
-var Adapters = require('./lib/adapters');
+var lib = require('./lib');
 var assert = require('assert-plus');
-
-function Constructor(__super) {
-  function Model(attributes) {
-    this.attributes = _util.merge({}, this.constructor.defaults || {}, attributes || {});
-    this.changes = {};
-    this.errors = new ErrorHandler(this);
-    this.uid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-      var r = Math.random() * 16 | 0,
-        v = c == 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
-
-    _util.merge(this, new EventEmitter());
-
-    if (_util.isFunction(this.constructor.initialize)) {
-      this.constructor.initialize.apply(this, arguments);
-    }
-  }
-
-  Model.prototype = _util.merge({}, _model_proto, __super.prototype);
-  Model.prototype.constructor = Model;
-
-  return Model;
-}
 
 function Collection(attrs, explicitAttrs) {
   var attributes = attrs || {};
   var explicit = explicitAttrs || {};
   var parent = attributes._parent || Object;
+  var validName = /^[$A-Z_][0-9A-Z_$]*$/i;
+  var name = 'Model';
 
-  return _util.merge(new Constructor(parent), this, attributes, new EventEmitter(), {
+  if (explicit.name && validName.test(explicit.name)) {
+    name = explicit.name.toString();
+    delete attributes.name;
+  } else if (explicit.name && !validName.test(explicit.name)) {
+    throw new lib.errors.RestifyModelException('Invalid model name: ' + explicit.name);
+  }
+
+  var Model = new Function('var load = this; return function ' + name + '(){ load.apply(this, arguments); }').call(function(attributes) {
+    this.attributes = lib.util.merge({}, this.constructor.defaults || {}, attributes || {});
+    this.changes = {};
+    this.errors = new lib.errors.ErrorHandler(this);
+    this.uid = lib.uid();
+
+    lib.util.merge(this, new lib.EventEmitter());
+
+    if (lib.util.isFunction(this.constructor.initialize)) {
+      this.constructor.initialize.apply(this, arguments);
+    }
+
+    return this;
+  });
+
+  Model.prototype = lib.util.merge({}, lib.proto, parent.prototype);
+  Model.prototype.constructor = Model;
+
+  return lib.util.merge(Model, this, attributes, new lib.EventEmitter(), {
     collection: explicit.collection || [],
     path: explicit.path,
-    uid: 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-      var r = Math.random() * 16 | 0,
-        v = c == 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    })
-  }).plugin(Adapters).plugin(Routes);
+    uid: lib.uid()
+  }).plugin(lib.adapters).plugin(lib.middleware);
 }
 
 Collection.prototype.add = function(obj) {
@@ -65,7 +60,7 @@ Collection.prototype.add = function(obj) {
 
   if (obj.constructor === this) {
     model = obj;
-  } else if (_util.isArray(obj)) {
+  } else if (lib.util.isArray(obj)) {
     for (var index in obj) {
       self.add(obj[index]);
     }
@@ -94,6 +89,14 @@ Collection.prototype.all = function() {
 
 Collection.prototype.count = function() {
   return this.all().length;
+}
+
+Collection.prototype.with = function(collection) {
+  assert.array(collection, 'with.collection');
+
+  return this.extend({
+    collection: collection
+  });
 }
 
 Collection.prototype.detect = function(iterator) {
@@ -136,7 +139,7 @@ Collection.prototype.get = function(id) {
   });
 }
 
-Collection.prototype.keyname = function(){
+Collection.prototype.keyname = function() {
   return this.unique_key + '_' + this.uid;
 }
 
@@ -205,7 +208,7 @@ Collection.prototype.relationship = function(key) {
     var nodes = model.get(key);
     var matches = [];
 
-    if (_util.isArray(nodes)) {
+    if (lib.util.isArray(nodes)) {
       matches = this.select(function(model) {
         return ~nodes.indexOf(model.id());
       });
@@ -268,7 +271,7 @@ Collection.prototype.sort = function(fn) {
 }
 
 Collection.prototype.sortBy = function(attribute_or_func) {
-  var is_func = _util.isFunction(attribute_or_func);
+  var is_func = lib.util.isFunction(attribute_or_func);
   var extract = function(model) {
     return attribute_or_func.call(model);
   }
@@ -304,7 +307,7 @@ Collection.prototype.plugin = function(plugin) {
 }
 
 Collection.prototype.extend = function(attrs) {
-  var copy = _util.merge({}, this, attrs, {
+  var copy = lib.util.merge({}, this, attrs, {
     _parent: this
   });
 
@@ -315,12 +318,18 @@ Collection.prototype.merge = function() {
   var args = Array.prototype.slice.call(arguments);
   args.unshift(this);
 
-  return _util.merge.apply(this, args);
+  return lib.util.merge.apply(this, args);
 }
 
 Collection.prototype.namespace = function ns(pathname) {
+  assert.optionalString(pathname, 'namespace.pathname');
+
+  if (!this.server) {
+    throw new RestifyModelException('Cannot create namespace: server is not defined');
+  }
+
   if (!this.path) {
-    throw new RestifyModelException('Cannot create namespace of invalid path');
+    throw new RestifyModelException('Cannot create namespace: invalid path');
   }
 
   var self = this;
@@ -342,22 +351,28 @@ Collection.prototype.namespace = function ns(pathname) {
     }
   });
 
-  return _util.merge(methods, {
-    _ctx: self,
+  return lib.util.merge(methods, {
     toString: String.prototype.toString.bind(context.toString()),
-    namespace: function() {
-      var subpath = path.join(pathname || '', arguments[0] || '');
-
-      return ns.apply(self, [subpath]);
+    getContext: function() {
+      return self;
     },
-    inherits: function(coll) {
+    namespace: function() {
+      var args = [path.join(pathname || '', arguments[0] || '')];
+      var nsmiddleware = Array.prototype.slice.call(arguments, 1);
+
+      return ns.apply(self, args.concat(nsmiddleware));
+    },
+    from: function(coll) {
       return this.namespace('/:' + coll.keyname());
+    },
+    cast: function(castedMethod, castedPath, middlewares) {
+      return this[castedMethod].apply(server, [castedPath].concat(middlewares));
     }
   });
 }
 
 Collection.prototype.include = function(obj) {
-  _util.merge(this.prototype, obj);
+  lib.util.merge(this.prototype, obj);
 
   return this;
 }
@@ -366,266 +381,33 @@ Collection.prototype.parent = function() {
   return this._parent;
 }
 
-Collection.prototype.service = true;
-
-Collection.prototype.operations = 'CRUD';
-
-function ErrorHandler(model) {
-  this.errors = {};
-  this.model = model;
-};
-
-ErrorHandler.prototype = {
-  add: function(attribute, message) {
-    if (!this.errors[attribute]) this.errors[attribute] = [];
-    this.errors[attribute].push(message);
-    return this;
-  },
-  all: function() {
-    return this.errors;
-  },
-  clear: function() {
-    this.errors = {};
-    return this;
-  },
-  each: function(fn) {
-    for (var attribute in this.errors) {
-      for (var i = 0; i < this.errors[attribute].length; i++) {
-        fn.call(this, attribute, this.errors[attribute][i]);
-      }
+Collection.prototype.adapter = function defaultAdapter() {
+  return {
+    read: function(cb) {
+      return cb();
     }
-    return this;
-  },
-  on: function(attribute) {
-    return this.errors[attribute] || [];
-  },
-  size: function() {
-    var count = 0;
-    this.each(function() {
-      count++;
-    });
-
-    return count;
-  }
-};
-
-var _model_proto = {
-  attr: function(name, value) {
-    if (arguments.length === 0) {
-      // Combined attributes/changes object.
-      return _util.merge({}, this.attributes, this.changes);
-    } else if (arguments.length === 2) {
-      // Don't write to attributes yet, store in changes for now.
-      if (this.attributes[name] === value) {
-        // Clean up any stale changes.
-        delete this.changes[name];
-      } else {
-        this.changes[name] = value;
-      }
-
-      this.emit('change:' + name, [this]);
-
-      return this;
-    } else if (typeof name === 'object') {
-      // Mass-assign attributes.
-      for (var key in name) {
-        this.attr(key, name[key]);
-      }
-
-      this.emit('change', [this]);
-
-      return this;
-    } else {
-      // Changes take precedent over attributes.
-      return (name in this.changes) ? this.changes[name] : this.attributes[name];
-    }
-  },
-  callPersistMethod: function(method, callback) {
-    var self = this;
-
-    // Automatically manage adding and removing from the model's Collection.
-    var manageCollection = function() {
-      if (method === 'destroy') {
-        self.constructor.remove(self);
-      } else {
-        self.constructor.add(self);
-      }
-    };
-
-    /****
-     * Wrap the existing callback in this function so we always manage the
-     * collection and emit events from here rather than relying on the
-     * persist adapter to do it for us. The persist adapter is
-     * only required to execute the callback with a single argument - a
-     * boolean to indicate whether the call was a success - though any
-     * other arguments will also be forwarded to the original callback.
-     */
-    function wrappedCallback(success) {
-      if (success) {
-        // Merge any changes into attributes and clear changes.
-        self.merge(self.changes).reset();
-        // Add/remove from collection if persist was successful.
-        manageCollection();
-        // Trigger the event before executing the callback.
-        self.emit(method);
-      }
-
-      // Store the return value of the callback.
-      var value;
-      // Run the supplied callback.
-      if (callback) value = callback.apply(self, arguments);
-
-      return value;
-    };
-
-    if (this.constructor._persist) {
-      this.constructor._persist[method](this, wrappedCallback);
-    } else {
-      wrappedCallback.call(this, true);
-    }
-  },
-  destroy: function(callback) {
-    this.callPersistMethod('destroy', callback);
-    return this;
-  },
-  extend: function() {
-    var args = [{}, this.constructor.prototype].concat(Array.prototype.slice.call(arguments));
-
-    return _util.merge.apply({}, args);
-  },
-  id: function() {
-    return this.attributes[this.constructor.unique_key];
-  },
-  merge: function(attributes) {
-    _util.merge(this.attributes, attributes);
-
-    return this;
-  },
-  get: function(prop) {
-    return this.attr.call(this, prop);
-  },
-  set: function(prop, value) {
-    return this.attr.call(this, prop, value);
-  },
-  isNew: function() {
-    return this.id() === undefined;
-  },
-  pick: function(keys) {
-    var result = {};
-    var attrs = this.attr();
-
-    for (var prop in keys) {
-      var key = keys[prop];
-      result[key] = attrs[key];
-    }
-
-    return result;
-  },
-  reset: function() {
-    this.errors.clear();
-    this.changes = {};
-
-    return this;
-  },
-  save: function(callback) {
-    if (this.valid()) {
-      var method = (this.isNew()) ? 'create' : 'update';
-      this.callPersistMethod(method, callback);
-    } else if (callback) {
-      callback(false);
-    }
-
-    return this;
-  },
-  toJSON: function() {
-    return this.attr();
-  },
-  valid: function() {
-    this.errors.clear();
-    this.validate();
-
-    return this.errors.size() === 0;
-  },
-  validate: function() {
-    return this;
   }
 }
 
 Collection.prototype.middleware = {
   extend: function(attrs) {
-    return _util.merge({}, this, attrs);
-  },
-  assign: function(stack) {
-    return function(req, res, next) {
-      req._resources = stack;
-      req.collection = stack.slice().pop();
-
-      if (stack && stack.length > 1 && req.collection) {
-        var prevIndex = stack.indexOf(req.collection) - 1;
-        var Coll = stack[prevIndex];
-
-        req.model = Coll.get(req.params[Coll.keyname()]);
-      }
-
-      next();
-    }
-  },
-  list: function(req, res) {
-    var data;
-
-    if (req.collection.key && req.model) {
-      data = req.collection.key.call(req.collection, req.model);
-    } else {
-      data = req.collection.toJSON();
-    }
-
-    res.send(data);
-  },
-  detail: function(req, res, next) {
-    var pk = req.collection.keyname();
-    var id = req.params[pk];
-    var model = req.collection.get(id);
-
-    if (!model) {
-      return res.send(404);
-    }
-
-    req.model = model;
-
-    return next();
-  },
-  read: function(req, res) {
-    res.send(req.model.toJSON());
-  },
-  update: function(req, res) {
-
-  },
-  create: function(req, res) {
-
-  },
-  remove: function(req, res) {
-
-  },
-  delegate: function(req, res, next) {
-
-  },
-  end: function(req, res, next) {
-
+    return lib.util.merge({}, this, attrs);
   }
 }
 
-function RestifyModelException(msg) {
-  this.name = 'RestifyModelException';
-  this.message = msg;
-}
+Collection.prototype.service = true;
+
+Collection.prototype.operations = 'CRUD';
+
+var BaseCollection = new Collection();
 
 function ServerCollection(app) {
-  return new Collection({
+  return BaseCollection.extend({
     server: app
   });
 }
 
 module.exports = exports = ServerCollection;
 module.exports.mount = ServerCollection;
-module.exports.Base = new Collection();
-module.exports.RestifyModelException = RestifyModelException;
+module.exports.errors = lib.errors;
+module.exports.Base = BaseCollection;
