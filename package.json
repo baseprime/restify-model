@@ -1,12 +1,16 @@
 {
   "name": "restify-model",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "'Model adapter for Restify or Express.js'",
   "main": "index.js",
   "scripts": {
     "test": "node test/test.js"
   },
   "devDependencies": {
+    "gulp": "^3.9.0",
+    "gulp-jsbeautifier": "^1.0.1",
+    "gulp-nodemon": "^2.0.6",
+    "mongoose": "^4.1.7",
     "restify": "^4.0.3"
   },
   "author": "Greg Sabia Tucker",
@@ -14,7 +18,9 @@
   "directories": {
     "test": "test"
   },
-  "dependencies": {},
+  "dependencies": {
+    "assert-plus": "^0.2.0"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/bytecipher/restify-model.git"
