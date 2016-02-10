@@ -91,11 +91,11 @@ Collection.prototype.count = function() {
   return this.all().length;
 }
 
-Collection.prototype.with = function(collection) {
-  assert.array(collection, 'with.collection');
+Collection.prototype.with = function(iterator) {
+  assert.func(iterator, 'with.iterator');
 
   return this.extend({
-    collection: collection
+    collection: this.filter(iterator)
   });
 }
 
@@ -195,7 +195,7 @@ Collection.prototype.pluck = function(attribute) {
   var plucked = [];
 
   for (var i = 0, length = all.length; i < length; i++) {
-    plucked.push(all[i].attr(attribute));
+    plucked.push(all[i].get(attribute));
   }
 
   return plucked;
