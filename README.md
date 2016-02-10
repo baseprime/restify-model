@@ -300,3 +300,27 @@ var Action = Model.extend({
   // GET /people/add
   path: Person.namespace('/add')
 });
+
+### Even more middleware functionality
+```javascript
+// You can specify which middleware to run on a specific namespace
+function doAuth(req, res, next) {
+  if (req.model.isAuthorized()) {
+    next();
+  } else {
+    res.send(401);
+  }
+}
+
+function doSomethingElse(req, res, next) {
+  somethingElse();
+  next();
+}
+
+var customNamespace = Person.namespace('/auth', doAuth, doSomethingElse);
+
+var CustomModel = Model.extend({
+  // GET /person/auth will run the middleware above
+  path: customNamespace
+});
+```
