@@ -410,4 +410,4 @@ function ServerCollection(app) {
 module.exports = exports = ServerCollection;
 module.exports.mount = ServerCollection;
 module.exports.errors = lib.errors;
-module.exports.Base = BaseCollection;
+module.exports.Model = BaseCollection;
