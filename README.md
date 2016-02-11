@@ -324,4 +324,10 @@ var CustomModel = Model.extend({
   // GET /person/auth will run the middleware above
   path: customNamespace
 });
+
+// Or you can explicitly call namespace method (get, put, post, delete, etc)
+// GET /person/:id/foo
+customNamespace.get('/foo', function(req, res, next) {
+  res.send('bar');
+});
 ```
