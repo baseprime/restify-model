@@ -186,7 +186,7 @@ Restify Model comes with the following middleware
 - `findById` Finds related model, assigns it to `req.model`, calls `next()`
 - `detail` Gets `req.model` and sends `model.toJSON()`, ends request
 - `list` Gets `req.collection` and sends `collection.toJSON()`, ends request
-- `create` Creates a new instance of `req.model` and calls `model.save()`, calls `next()` (`middleware.detail`)
+- `create` Creates a new instance, assigns it to `req.model` and calls `model.save()`, calls `next()` (`middleware.detail`)
 - `update` Updates `req.model` with body and calls `model.save()`, calls `next()` (`middleware.detail`)
 - `remove` Removes `req.model`, calls `next()` (`middleware.detail`)
 
@@ -267,7 +267,7 @@ tim.save();
 
 ```
 
-### Running `colleciton.load()` on every request
+### Running `collection.load()` on every request
 ```javascript
 var Persist = Person.extend({
   middleware: Person.middleware.extend({
