@@ -1,5 +1,5 @@
 ## Restify Model
-A suprisingly useful model/collection adapter that builds routes and handles CRUD operations (Create, Read, Update and Delete). Works with any custom database adapter (Postgres, MySQL, MongoDB, etc.).
+A surprisingly useful model/collection adapter that builds routes and handles CRUD operations (Create, Read, Update and Delete). Works with any custom database adapter (Postgres, MySQL, MongoDB, etc.).
 
 ### Installation
 ```bash
