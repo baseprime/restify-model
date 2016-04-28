@@ -1,7 +1,7 @@
 {
   "name": "restify-model",
   "version": "0.3.1",
-  "description": "'A suprisingly useful model/collection adapter that builds routes and handles CRUD operations (Create, Read, Update and Delete). Works with any custom database adapter (Postgres, MySQL, MongoDB, etc.).'",
+  "description": "'A surprisingly useful model/collection adapter that builds routes and handles CRUD operations (Create, Read, Update and Delete). Works with any custom database adapter (Postgres, MySQL, MongoDB, etc.).'",
   "main": "index.js",
   "scripts": {
     "test": "node test/test.js"
