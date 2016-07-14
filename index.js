@@ -1,9 +1,9 @@
 /****
  * Restify Model
- * https://github.com/bytecipher/restify-model
+ * https://github.com/baseprime/restify-model
  * 
- * @author Greg Sabia Tucker <greg@bytecipher.io>
- * @link http://bytecipher.io
+ * @author Greg Sabia Tucker <greg@narrowlabs.com>
+ * @link http://basepri.me
  *
  * Released under MIT License. See LICENSE or http://opensource.org/licenses/MIT
  */
